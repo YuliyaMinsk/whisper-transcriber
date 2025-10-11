@@ -1,0 +1,20 @@
+# Игнорируем виртуальное окружение
+.venv/
+
+# Игнорируем расшифровки (но не README)
+transcripts/*
+!transcripts/README.md
+
+# Игнорируем аудио файлы (но не README)
+audio/*
+!audio/README.md
+
+# Кеш и временные файлы
+__pycache__/
+*.pyc
+*.pyo
+*.log
+temp_audio/
+
+# Системные файлы macOS
+.DS_Store
