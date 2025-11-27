@@ -1,16 +1,17 @@
-# Диаризация (Speaker Diarization)
+# --- Диаризация (Speaker Diarization) ---
 simple-diarizer==0.0.13
 speechbrain>=0.5.16
-huggingface_hub<0.20
 
-# Распознавание речи (ASR)
-openai-whisper>=20240930
+# --- Распознавание речи (ASR) ---
+transformers>=4.40.0
+accelerate>=0.29.0
 
-# Аудио-стек
-torch==2.2.2
-torchaudio==2.2.2
+# --- Аудио-стек ---
+torch>=2.4.0
+torchaudio>=2.4.0
 numpy<2.0
 soundfile>=0.12.1
 
-# Утилиты и поддержка
+# --- Утилиты ---
 tqdm>=4.66.0
+huggingface_hub
