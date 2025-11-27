@@ -30,7 +30,7 @@ import subprocess
 import argparse
 from typing import List, Tuple, Dict, Optional, Union
 
-import whisper  # openai-whisper
+import whisper  # openai-whisper, можно еще использовать faster-whisper
 from simple_diarizer.diarizer import Diarizer
 
 try:
@@ -47,7 +47,7 @@ OUTPUT_FOLDER: str = "transcripts"
 
 SUPPORTED_EXTENSIONS: Tuple[str, ...] = (".ogg", ".opus", ".mp3", ".wav", ".m4a", ".mp4")
 
-WHISPER_MODEL_NAME: str = "base"
+WHISPER_MODEL_NAME: str = "medium"
 WHISPER_LANGUAGE: str = "ru"
 
 SPEAKER_PREFIX: str = "SPEAKER_"
@@ -265,14 +265,14 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
     file_stem: str = os.path.splitext(os.path.basename(input_path))[0]
     wav_path: str = os.path.join(TEMP_AUDIO_FOLDER, f"{file_stem}.16k_mono.wav")
 
-    # 1) Конвертация к целевому формату
+    # Конвертация к целевому формату
     if input_path.lower().endswith(".wav"):
         # На всякий случай тоже приводим к 16k/mono (чтобы не ловить несоответствие формата)
         run_ffmpeg_to_wav_16k_mono(input_path, wav_path)
     else:
         run_ffmpeg_to_wav_16k_mono(input_path, wav_path)
 
-    # 2) Диаризация
+    # Диаризация
     print(f"🧩 Диаризация (определение спикеров): {os.path.basename(input_path)} ...")
     diar_segments = run_diarization(wav_path, num_speakers)
     if not diar_segments:
@@ -284,11 +284,11 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
         original = str(seg["label"])
         seg["label"] = label_map.get(original, original)
 
-    # 3) ASR (Whisper) — сегменты с таймкодами и текстом
+    # ASR (Whisper) — сегменты с таймкодами и текстом
     print(f"🔊 Расшифровка речи Whisper: {os.path.basename(input_path)} ...")
     asr_segments = run_whisper_with_segments(wav_path, WHISPER_MODEL_NAME, WHISPER_LANGUAGE)
 
-    # 4) Маппинг: каждому ASR-сегменту назначаем спикера
+    # Маппинг: каждому ASR-сегменту назначаем спикера
     assigned: List[Dict[str, Union[float, str]]] = []
     for seg in asr_segments:
         seg_start: float = float(seg["start"])
@@ -307,7 +307,7 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
             "text": seg_text,
         })
 
-    # 5) Сохранение результатов в одну папку
+    # Сохранение результатов в одну папку
     save_outputs(file_stem, assigned, OUTPUT_FOLDER)
 
 
@@ -353,10 +353,6 @@ def main() -> None:
     ensure_directories()
 
     # Загружаем Whisper модель один раз (ускоряет серию файлов)
-    # Примечание: для простоты совместимости с твоим примером можно загрузить внутри run_whisper_with_segments,
-    # но при большом числе файлов лучше держать модель в main и передавать. Здесь оставлено как в твоём стиле.
-    # Если захочешь — переделаю на "один раз загрузил — многократно использовал".
-
     # Перебираем файлы во входной папке
     input_files: List[str] = []
     for filename in os.listdir(AUDIO_FOLDER):

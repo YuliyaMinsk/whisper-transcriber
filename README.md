@@ -6,10 +6,14 @@
 
 Этот проект позволяет автоматически транскрибировать аудиофайлы в текст с помощью модели Whisper от OpenAI. Поддерживается два режима работы:
 
-- **Простая транскрипция** (`transcribe.py`) — только распознавание речи
-- **Транскрипция с диаризацией** (`transcribe_diarize.py`) — распознавание речи + определение спикеров
+- **Простая транскрипция** (`transcribe.py`) — только распознавание речи с использованием Hugging Face Transformers
+- **Транскрипция с диаризацией** (`transcribe_diarize.py`) — распознавание речи + определение спикеров с помощью simple-diarizer
 
 Скрипты обрабатывают файлы из папки `audio/` и сохраняют результаты в папку `transcripts/`.
+
+**Модель:** Whisper Medium  
+**Язык:** Русский  
+**Оптимизация:** Поддержка GPU (CUDA, MPS для Apple Silicon)
 
 ## Поддерживаемые форматы
 
@@ -20,7 +24,7 @@
 - `.m4a` - M4A
 - `.mp4` - MP4 (извлекается аудио)
 
-### Требования
+## Требования
 
 - Python 3.11.9
 - ffmpeg (для конвертации аудио)
@@ -75,7 +79,14 @@ python transcribe.py
 
 4. Результаты будут сохранены в папку `transcripts/` в виде `.txt` файлов
 
+**Примечание:** Скрипт автоматически определяет доступное устройство:
+- MPS (GPU) для Apple Silicon
+- CUDA для NVIDIA GPU
+- CPU в остальных случаях
+
 ### Транскрипция с определением спикеров
+
+Использует simple-diarizer для идентификации спикеров и Whisper для ASR.
 
 1. Поместите аудиофайлы в папку `audio/`
 
@@ -84,19 +95,28 @@ python transcribe.py
 source .venv/bin/activate
 ```
 
-3. (Опционально) Укажите количество спикеров в файле `transcribe_diarize.py`:
-```python
-NUM_SPEAKERS: Optional[int] = 3  # или 2, или None для автоопределения
-```
+3. Запустите транскрипцию с диаризацией:
 
-4. Запустите транскрипцию с диаризацией:
 ```bash
+# Автоопределение количества спикеров
 python transcribe_diarize.py
+
+# Явно указать количество спикеров
+python transcribe_diarize.py --speakers 2
+python transcribe_diarize.py -s 3
+
+# Справка
+python transcribe_diarize.py --help
 ```
 
-5. Результаты будут сохранены в `transcripts/`:
-   - `<имя_файла>.diarized.txt` — текст с временными метками и спикерами
-   - `<имя_файла>.diarized.json` — структурированные данные в JSON
+4. Результаты будут сохранены в `transcripts/`:
+   - `<имя_файла>.diarized.txt` — текст с временными метками и спикерами в формате `[HH:MM:SS.mmm–HH:MM:SS.mmm] SPEAKER_N: текст`
+   - `<имя_файла>.diarized.json` — структурированные данные в JSON (start, end, speaker, text)
+
+**Алгоритм назначения спикеров:**
+- По середине сегмента ASR
+- При неоднозначности — по максимальному перекрытию
+- Fallback на SPEAKER_1 при отсутствии диаризации
 
 ## Структура проекта
 
@@ -104,8 +124,8 @@ python transcribe_diarize.py
 whisper-transcriber/
 ├── README.md
 ├── requirements.txt
-├── transcribe.py              # Простая транскрипция
-├── transcribe_diarize.py      # Транскрипция + диаризация
+├── transcribe.py              # Простая транскрипция (Transformers Pipeline)
+├── transcribe_diarize.py      # Транскрипция + диаризация (simple-diarizer + Whisper)
 ├── audio/
 │   ├── README.md
 │   ├── ARCHIVE/               # Архив обработанных файлов
@@ -116,14 +136,13 @@ whisper-transcriber/
 │   ├── ARCHIVE/               # Архив результатов
 │   └── (результаты транскрипции)
 ├── pretrained_models/         # Предобученные модели для диаризации
-│   └── spkrec-xvect-voxceleb/
 └── .venv/
     └── (виртуальное окружение)
 ```
 
 ## Примечания
 
-- При первом запуске Whisper загрузит модель (~1GB)
+- При первом запуске Whisper загрузит модель Medium (~1.5GB)
 - Модель оптимизирована для русского языка
 - Для диаризации требуется ffmpeg и предобученные модели speechbrain
 - После обработки рекомендуется переместить файлы в `audio/ARCHIVE/` и `transcripts/ARCHIVE/`
