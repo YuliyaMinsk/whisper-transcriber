@@ -26,6 +26,7 @@
 import os
 import json
 import math
+import time
 import subprocess
 import argparse
 from typing import List, Tuple, Dict, Optional, Union
@@ -44,6 +45,7 @@ except Exception:
 AUDIO_FOLDER: str = "audio"
 TEMP_AUDIO_FOLDER: str = "temp_audio"
 OUTPUT_FOLDER: str = "transcripts"
+LOG_FILE: str = "processing.log.csv"
 
 SUPPORTED_EXTENSIONS: Tuple[str, ...] = (".ogg", ".opus", ".mp3", ".wav", ".m4a", ".mp4")
 
@@ -103,6 +105,38 @@ def seconds_to_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds_int:02d}.{milliseconds:03d}"
 
 
+def format_duration(seconds: float) -> str:
+    """Форматирует секунды в MM:SS или HH:MM:SS."""
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def write_log(
+    filename: str,
+    duration: float,
+    num_speakers: int,
+    processing_time: float
+) -> None:
+    """Записывает информацию об обработке в лог-файл."""
+    from datetime import datetime
+    
+    # Если файл не существует — создаём с заголовком
+    if not os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write("timestamp,filename,duration_sec,model,speakers,processing_time_sec\n")
+    
+    # Дописываем строку с данными
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{timestamp},{filename},{format_duration(duration)},{WHISPER_MODEL_NAME},{num_speakers},{format_duration(processing_time)}\n")
+
+
 # --------------------
 # Диаризация + ASR
 # --------------------
@@ -151,21 +185,25 @@ def remap_speaker_labels(diar_segments: List[Dict[str, Union[float, str]]]) -> D
     return mapping
 
 
-def run_whisper_with_segments(wav_path: str, model_name: str, language: str) -> List[Dict[str, Union[float, str]]]:
+def run_whisper_with_segments(wav_path: str, model_name: str, language: str) -> Tuple[List[Dict[str, Union[float, str]]], float]:
     """
-    Запускает Whisper и возвращает список сегментов: start, end, text.
+    Запускает Whisper и возвращает (список сегментов, duration).
     """
     model = whisper.load_model(model_name)
-    # Whisper сам извлекает признаки из WAV; важно, что у нас уже 16кГц моно
     result = model.transcribe(wav_path, language=language, verbose=False)
+    
     segments: List[Dict[str, Union[float, str]]] = []
+    duration: float = 0.0
+    
     for seg in result.get("segments", []):
         start_val: float = float(seg.get("start", 0.0))
         end_val: float = float(seg.get("end", 0.0))
         text_val: str = str(seg.get("text", "")).strip()
         if end_val > start_val and text_val:
             segments.append({"start": start_val, "end": end_val, "text": text_val})
-    return segments
+        duration = max(duration, end_val)  # последний end = duration
+    
+    return segments, duration
 
 
 def compute_overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
@@ -262,6 +300,7 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
         input_path: путь к входному аудиофайлу
         num_speakers: количество спикеров (None для автоопределения)
     """
+    start_time = time.time()
     file_stem: str = os.path.splitext(os.path.basename(input_path))[0]
     wav_path: str = os.path.join(TEMP_AUDIO_FOLDER, f"{file_stem}.16k_mono.wav")
 
@@ -286,7 +325,7 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
 
     # ASR (Whisper) — сегменты с таймкодами и текстом
     print(f"🔊 Расшифровка речи Whisper: {os.path.basename(input_path)} ...")
-    asr_segments = run_whisper_with_segments(wav_path, WHISPER_MODEL_NAME, WHISPER_LANGUAGE)
+    asr_segments, duration = run_whisper_with_segments(wav_path, WHISPER_MODEL_NAME, WHISPER_LANGUAGE)
 
     # Маппинг: каждому ASR-сегменту назначаем спикера
     assigned: List[Dict[str, Union[float, str]]] = []
@@ -306,6 +345,14 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
             "speaker": speaker_label,
             "text": seg_text,
         })
+
+    processing_time = time.time() - start_time
+    write_log(
+        filename=os.path.basename(input_path),
+        duration=duration,
+        num_speakers=len(label_map),
+        processing_time=processing_time
+    )
 
     # Сохранение результатов в одну папку
     save_outputs(file_stem, assigned, OUTPUT_FOLDER)
