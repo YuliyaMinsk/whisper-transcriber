@@ -25,3 +25,6 @@ pretrained_models/
 # Игнорируем файлы конфигурации среды разработки
 .vscode/
 .github/
+
+# Игнорируем файлы логов обработки
+processing.log.csv
