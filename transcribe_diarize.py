@@ -25,7 +25,6 @@
 
 import os
 import json
-import math
 import time
 import subprocess
 import argparse
@@ -129,12 +128,12 @@ def write_log(
     # Если файл не существует — создаём с заголовком
     if not os.path.exists(LOG_FILE):
         with open(LOG_FILE, "w", encoding="utf-8") as f:
-            f.write("timestamp,filename,duration_sec,model,speakers,processing_time_sec\n")
+            f.write("timestamp,filename,speakers,duration_sec,model,processing_time_sec\n")
     
     # Дописываем строку с данными
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{timestamp},{filename},{format_duration(duration)},{WHISPER_MODEL_NAME},{num_speakers},{format_duration(processing_time)}\n")
+        f.write(f"{timestamp},{filename},{num_speakers},{format_duration(duration)},{WHISPER_MODEL_NAME},{format_duration(processing_time)}\n")
 
 
 # --------------------
@@ -185,11 +184,10 @@ def remap_speaker_labels(diar_segments: List[Dict[str, Union[float, str]]]) -> D
     return mapping
 
 
-def run_whisper_with_segments(wav_path: str, model_name: str, language: str) -> Tuple[List[Dict[str, Union[float, str]]], float]:
+def run_whisper_with_segments(wav_path: str, model, language: str) -> Tuple[List[Dict[str, Union[float, str]]], float]:
     """
     Запускает Whisper и возвращает (список сегментов, duration).
     """
-    model = whisper.load_model(model_name)
     result = model.transcribe(wav_path, language=language, verbose=False)
     
     segments: List[Dict[str, Union[float, str]]] = []
@@ -288,7 +286,7 @@ def save_outputs(
     print(f"✅ Сохранено: {os.path.basename(txt_path)} и {os.path.basename(json_path)}")
 
 
-def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
+def process_one_file(input_path: str, num_speakers: Optional[int], model) -> None:
     """
     Обрабатывает один входной файл:
     - конвертирует в WAV 16k моно,
@@ -299,6 +297,7 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
     Args:
         input_path: путь к входному аудиофайлу
         num_speakers: количество спикеров (None для автоопределения)
+        model: загруженная модель Whisper
     """
     start_time = time.time()
     file_stem: str = os.path.splitext(os.path.basename(input_path))[0]
@@ -325,7 +324,7 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
 
     # ASR (Whisper) — сегменты с таймкодами и текстом
     print(f"🔊 Расшифровка речи Whisper: {os.path.basename(input_path)} ...")
-    asr_segments, duration = run_whisper_with_segments(wav_path, WHISPER_MODEL_NAME, WHISPER_LANGUAGE)
+    asr_segments, duration = run_whisper_with_segments(wav_path, model, WHISPER_LANGUAGE)
 
     # Маппинг: каждому ASR-сегменту назначаем спикера
     assigned: List[Dict[str, Union[float, str]]] = []
@@ -347,10 +346,12 @@ def process_one_file(input_path: str, num_speakers: Optional[int]) -> None:
         })
 
     processing_time = time.time() - start_time
+    num_speakers_logged: int = len(label_map) or 1
+
     write_log(
         filename=os.path.basename(input_path),
         duration=duration,
-        num_speakers=len(label_map),
+        num_speakers=num_speakers_logged,
         processing_time=processing_time
     )
 
@@ -399,7 +400,6 @@ def main() -> None:
     
     ensure_directories()
 
-    # Загружаем Whisper модель один раз (ускоряет серию файлов)
     # Перебираем файлы во входной папке
     input_files: List[str] = []
     for filename in os.listdir(AUDIO_FOLDER):
@@ -411,10 +411,15 @@ def main() -> None:
         print("⚠️ В папке 'audio' не найдено подходящих файлов.")
         return
 
+    print(f"🎬 Найдено файлов для обработки: {len(input_files)}")
+    print("⏳ Загружаю Whisper модель...")
+    model = whisper.load_model(WHISPER_MODEL_NAME)
+    print("✅ Модель загружена")
+
     for input_path in input_files:
         print(f"🎞️ Готовлю: {os.path.basename(input_path)}")
         try:
-            process_one_file(input_path, num_speakers)
+            process_one_file(input_path, num_speakers, model)
         except Exception as error:
             print(f"❌ Ошибка при обработке {os.path.basename(input_path)}: {error}")
 
