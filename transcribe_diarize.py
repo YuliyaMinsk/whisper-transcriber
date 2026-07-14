@@ -184,11 +184,26 @@ def remap_speaker_labels(diar_segments: List[Dict[str, Union[float, str]]]) -> D
     return mapping
 
 
-def run_whisper_with_segments(wav_path: str, model, language: str) -> Tuple[List[Dict[str, Union[float, str]]], float]:
+def run_whisper_with_segments(
+    wav_path: str,
+    model,
+    language: str,
+    robust: bool = False,
+) -> Tuple[List[Dict[str, Union[float, str]]], float]:
     """
     Запускает Whisper и возвращает (список сегментов, duration).
+
+    robust=False (по умолчанию): обычный путь Whisper, качество как правило лучше.
+    robust=True: condition_on_previous_text=False — включай, если запись «залипла»
+    в "..." (тихий/невнятный старт вырождается в "...", и эта подсказка тащит
+    "..." через весь файл). Отключает передачу предыдущего текста как подсказки.
     """
-    result = model.transcribe(wav_path, language=language, verbose=False)
+    result = model.transcribe(
+        wav_path,
+        language=language,
+        verbose=False,
+        condition_on_previous_text=not robust,
+    )
     
     segments: List[Dict[str, Union[float, str]]] = []
     duration: float = 0.0
@@ -286,18 +301,19 @@ def save_outputs(
     print(f"✅ Сохранено: {os.path.basename(txt_path)} и {os.path.basename(json_path)}")
 
 
-def process_one_file(input_path: str, num_speakers: Optional[int], model) -> None:
+def process_one_file(input_path: str, num_speakers: Optional[int], model, robust: bool = False) -> None:
     """
     Обрабатывает один входной файл:
     - конвертирует в WAV 16k моно,
     - запускает диаризацию,
     - запускает Whisper,
     - сопоставляет сегменты и сохраняет результаты.
-    
+
     Args:
         input_path: путь к входному аудиофайлу
         num_speakers: количество спикеров (None для автоопределения)
         model: загруженная модель Whisper
+        robust: устойчивый режим Whisper против залипания в "..." (см. run_whisper_with_segments)
     """
     start_time = time.time()
     file_stem: str = os.path.splitext(os.path.basename(input_path))[0]
@@ -324,7 +340,7 @@ def process_one_file(input_path: str, num_speakers: Optional[int], model) -> Non
 
     # ASR (Whisper) — сегменты с таймкодами и текстом
     print(f"🔊 Расшифровка речи Whisper: {os.path.basename(input_path)} ...")
-    asr_segments, duration = run_whisper_with_segments(wav_path, model, WHISPER_LANGUAGE)
+    asr_segments, duration = run_whisper_with_segments(wav_path, model, WHISPER_LANGUAGE, robust=robust)
 
     # Маппинг: каждому ASR-сегменту назначаем спикера
     assigned: List[Dict[str, Union[float, str]]] = []
@@ -374,6 +390,7 @@ def parse_arguments() -> argparse.Namespace:
   python transcribe_diarize.py              # автоопределение количества спикеров
   python transcribe_diarize.py -s 2         # 2 спикера
   python transcribe_diarize.py --speakers 3 # 3 спикера
+  python transcribe_diarize.py -s 2 --robust  # устойчивый режим, если текст залип в "..."
         """
     )
     
@@ -384,7 +401,14 @@ def parse_arguments() -> argparse.Namespace:
         metavar="N",
         help="Количество спикеров (по умолчанию: автоопределение)"
     )
-    
+
+    parser.add_argument(
+        "--robust",
+        action="store_true",
+        help="Устойчивый режим Whisper: включай, если запись 'залипла' в '...' "
+             "(condition_on_previous_text=False). Обычно не нужен — качество по умолчанию выше."
+    )
+
     return parser.parse_args()
 
 
@@ -392,11 +416,15 @@ def main() -> None:
     # Парсим аргументы командной строки
     args = parse_arguments()
     num_speakers = args.speakers
-    
+    robust = args.robust
+
     if num_speakers is not None:
         print(f"📊 Количество спикеров: {num_speakers}")
     else:
         print("📊 Количество спикеров: автоопределение")
+
+    if robust:
+        print("🛡️ Устойчивый режим Whisper (condition_on_previous_text=False)")
     
     ensure_directories()
 
@@ -419,7 +447,7 @@ def main() -> None:
     for input_path in input_files:
         print(f"🎞️ Готовлю: {os.path.basename(input_path)}")
         try:
-            process_one_file(input_path, num_speakers, model)
+            process_one_file(input_path, num_speakers, model, robust=robust)
         except Exception as error:
             print(f"❌ Ошибка при обработке {os.path.basename(input_path)}: {error}")
 
